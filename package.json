@@ -1,18 +1,94 @@
+-- Auto Kill Aura cho NPC xung quanh (Roblox Lua)
+-- Script đặt trong StarterCharacterScripts hoặc LocalScript (nếu dùng FE)
+
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
 
-while task.wait(1) do
-    pcall(function()
-        for _, v in ipairs(player.PlayerGui:GetDescendants()) do
-            if (v:IsA("TextButton") or v:IsA("ImageButton")) and
-               string.find(string.lower(v.Name), "skip") then
+-- Cấu hình
+local AURA_RADIUS = 20           -- Bán kính hiệu lực (studs)
+local DAMAGE_AMOUNT = 50         -- Sát thương mỗi lần
+local COOLDOWN_TIME = 0.5        -- Giây giữa các lần gây sát thương
+local TARGET_TAG = "NPC"         -- Tag của NPC (hoặc "Monster", "Enemy")
 
-                local text = v.Text and string.lower(v.Text) or ""
+-- Biến trạng thái
+local lastDamageTime = 0
+local isActive = true
 
-                if text:find("off") then
-                    v:Activate()
+-- Hàm kiểm tra NPC hợp lệ
+local function IsValidNPC(target)
+    if not target or not target:IsA("Model") then return false end
+    if target == Character then return false end
+    if not target:FindFirstChild("Humanoid") then return false end
+    local humanoid = target.Humanoid
+    if humanoid.Health <= 0 then return false end
+    -- Kiểm tra tag (nếu có)
+    if target:FindFirstChild(TARGET_TAG) == nil then return false end
+    return true
+end
+
+-- Hàm gây sát thương (dùng RemoteEvent nếu cần, ở đây dùng Fake dmg)
+local function DealDamage(target)
+    local humanoid = target:FindFirstChild("Humanoid")
+    if not humanoid then return end
+    -- Ghi chú: Trên server, dùng :TakeDamage(). Client chỉ giả lập nếu không có FE.
+    -- Thực tế nên gọi RemoteEvent gửi lên server.
+    humanoid.Health = humanoid.Health - DAMAGE_AMOUNT
+    -- Hiệu ứng (tùy chọn)
+    local debris = game:GetService("Debris")
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(1,1,1)
+    part.Anchored = true
+    part.CanCollide = false
+    part.BrickColor = BrickColor.new("Bright red")
+    part.Position = target.PrimaryPart.Position + Vector3.new(0,2,0)
+    part.Parent = workspace
+    debris:AddItem(part, 0.5)
+end
+
+-- Vòng lặp chính
+RunService.Heartbeat:Connect(function(deltaTime)
+    if not isActive then return end
+    if not Character or not Character.PrimaryPart then 
+        Character = LocalPlayer.Character
+        if not Character then return end
+    end
+    
+    local currentTime = tick()
+    if currentTime - lastDamageTime < COOLDOWN_TIME then return end
+    
+    local origin = Character.PrimaryPart.Position
+    local targets = workspace:GetDescendants()
+    
+    for _, obj in ipairs(targets) do
+        if IsValidNPC(obj) then
+            local primary = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso")
+            if primary then
+                local dist = (primary.Position - origin).Magnitude
+                if dist <= AURA_RADIUS then
+                    DealDamage(obj)
+                    lastDamageTime = currentTime
+                    break  -- Chỉ tấn công 1 mục tiêu mỗi lần để tránh spam
                 end
             end
         end
-    end)
-end
+    end
+end)
+
+-- Bật/tắt aura (có thể gán phím)
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.G then  -- Phím G bật/tắt
+        isActive = not isActive
+        print("Auto Kill Aura: " .. tostring(isActive))
+    end
+end)
+
+-- Xử lý khi nhân vật chết/Respawn
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    Humanoid = newChar:WaitForChild("Humanoid")
+    print("Character respawned, aura tiếp tục")
+end)
